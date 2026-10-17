@@ -1,5 +1,12 @@
 name: Contribution regression validation
 on:
+  push:
+    branches: [codex/contribution-checks]
+permissions:
+  contents: read
+env:
+  CARGO_INCREMENTAL: 1
+jobs:
   bindgen:
     runs-on: ubuntu-latest
     timeout-minutes: 40
