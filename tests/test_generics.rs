@@ -224,3 +224,101 @@ fn test_recursive_generic_source() {
         "payload"
     );
 }
+
+#[test]
+fn test_recursive_generic_struct_source() {
+    #[derive(Error, Debug)]
+    #[error("recursive")]
+    struct RecursiveError<T> {
+        #[source]
+        source: Box<RecursiveError<T>>,
+        payload: T,
+    }
+
+    fn assert_error<E: std::error::Error>() {}
+
+    assert_error::<RecursiveError<&'static str>>();
+}
+
+#[test]
+fn test_nonrecursive_generic_source() {
+    #[derive(Error, Debug)]
+    #[error("generic source")]
+    struct GenericSource<T> {
+        #[source]
+        source: T,
+    }
+
+    let error = GenericSource {
+        source: std::io::Error::other("source"),
+    };
+    let _: &dyn std::error::Error = &error;
+}
+
+#[test]
+fn test_recursive_generic_optional_source() {
+    #[derive(Error, Debug)]
+    #[error("recursive")]
+    struct RecursiveError<T> {
+        #[source]
+        source: Option<Box<RecursiveError<T>>>,
+        payload: T,
+    }
+
+    let error = RecursiveError {
+        source: Some(Box::new(RecursiveError {
+            source: None,
+            payload: 1,
+        })),
+        payload: 2,
+    };
+    assert_eq!(
+        std::error::Error::source(&error).unwrap().to_string(),
+        "recursive"
+    );
+}
+
+#[test]
+fn test_foreign_generic_source_with_same_ident() {
+    mod foreign {
+        #[derive(thiserror::Error, Debug)]
+        #[error(transparent)]
+        pub struct RecursiveError<T>(pub T);
+    }
+
+    #[derive(Error, Debug)]
+    #[error("outer")]
+    struct RecursiveError<T> {
+        #[source]
+        source: foreign::RecursiveError<T>,
+    }
+
+    let error = RecursiveError {
+        source: foreign::RecursiveError(std::io::Error::other("foreign")),
+    };
+    assert_eq!(
+        std::error::Error::source(&error).unwrap().to_string(),
+        "foreign"
+    );
+}
+
+#[test]
+fn test_recursive_source_with_nonstatic_parameter() {
+    #[derive(Error, Debug)]
+    #[error("recursive")]
+    struct RecursiveError<T> {
+        #[source]
+        source: Option<Box<RecursiveError<T>>>,
+        marker: std::marker::PhantomData<fn(T)>,
+    }
+
+    fn check<'a>(_: &'a str) {
+        let error = RecursiveError::<&'a str> {
+            source: None,
+            marker: std::marker::PhantomData,
+        };
+        assert!(std::error::Error::source(&error).is_none());
+    }
+
+    check(&String::from("borrowed"));
+}
