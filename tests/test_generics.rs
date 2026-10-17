@@ -203,3 +203,24 @@ fn test_multiple_bound() {
     let error = Error { thing: 0xFFi32 };
     assert_eq!(error.to_string(), "0xff 0xFF");
 }
+
+// Regression test for https://github.com/dtolnay/thiserror/issues/317.
+#[test]
+fn test_recursive_generic_source() {
+    #[derive(Error, Debug)]
+    enum RecursiveError<T> {
+        #[error("recurse")]
+        Recurse(#[source] Box<RecursiveError<T>>),
+        #[error("payload")]
+        Payload(T),
+    }
+
+    fn as_error<E: std::error::Error>(error: &E) -> &dyn std::error::Error {
+        error
+    }
+
+    assert_eq!(
+        as_error(&RecursiveError::Payload("hello")).to_string(),
+        "payload"
+    );
+}
