@@ -1,120 +1,51 @@
-name: Contribution regression validation
+name: JPEG XL hosted memory regression
 on:
   push:
     branches: [codex/contribution-checks]
 permissions:
   contents: read
-env:
-  CARGO_INCREMENTAL: 1
 jobs:
-  bindgen:
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
+  jxl_memory_regression:
     if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_INCREMENTAL: "1"
+      CANDIDATE_SHA: 16beb4db40eaac41e063583b18d24413a3d26b6f
+      PR_HEAD_SHA: 112e202fedbf578025b10d89a742365c35b90712
+      BASE_SHA: 0da998f24dfc03069d49867f8877af2bf7c51f94
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Check out validation harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          repository: bogusyogi/rust-bindgen
-          ref: 1d54e596eaebbfd28de12c92acd094de6a868d66
-          path: source
+          ref: ${{ github.sha }}
+          path: harness
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
-      - name: Install libclang
-        working-directory: source
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libclang-dev
-      - name: Token and macro regressions
-        working-directory: source
-        shell: bash
-        run: |
-          cargo test -p bindgen --lib token_line_continuations
-          cargo test -p bindgen-tests --test tests macro
-  ureq:
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    if: github.event.repository.private == false
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Check out candidate with full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          repository: bogusyogi/ureq-proto
-          ref: 3d394ac4d955749cbccfcde10ef389820f415a77
-          path: ureq-proto
+          repository: Orthic-Labs/ember
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 0
+          path: ember
           persist-credentials: false
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0
         with:
-          repository: bogusyogi/ureq
-          ref: 7db8b56be06347cae17f58f2037aa14919b8fb85
-          path: ureq
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
-      - name: Protocol tests
-        working-directory: ureq-proto
+          toolchain: 1.98.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: ember
+          shared-key: lightcraft-jxl-1893-hosted
+          cache-on-failure: true
+      - name: Run before and after regression
         shell: bash
-        run: |
-          cargo test --all-features
-      - name: Client integration against protocol patch
-        working-directory: ureq
-        shell: bash
-        run: |
-          cargo --config 'patch.crates-io.ureq-proto.path="../ureq-proto"' update -p ureq-proto --precise 0.6.4
-          cargo --config 'patch.crates-io.ureq-proto.path="../ureq-proto"' test --lib
-          cargo --config 'patch.crates-io.ureq-proto.path="../ureq-proto"' test --doc
-  thiserror_green:
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    if: github.event.repository.private == false
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        run: bash harness/.github/scripts/validate-jxl-hosted.sh
+      - name: Upload logs and generated lock evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          repository: bogusyogi/thiserror
-          ref: eb83b07960266f0e8470e2b32fe77fe977868f2b
-          path: source
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
-      - name: Full crate tests
-        working-directory: source
-        shell: bash
-        run: cargo test
-  async_trait_green:
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    if: github.event.repository.private == false
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          repository: bogusyogi/async-trait
-          ref: 89e49d48c1fb56f9df42f94fa30fb3109e7bcb18
-          path: source
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
-      - name: Full crate tests
-        working-directory: source
-        shell: bash
-        run: cargo test
-  cygwin:
-    runs-on: windows-latest
-    timeout-minutes: 40
-    if: github.event.repository.private == false
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          repository: bogusyogi/BLAKE3
-          ref: d9ff95c098d65002c35dfbff423d9a78086658cd
-          path: source
-          persist-credentials: false
-      - uses: cygwin/cygwin-install-action@3f0a3f9f988f7e96b8c18098ae05eaec175f5b52
-        with:
-          install-dir: 'D:\cygwin'
-          packages: rustc cargo gcc-core gcc-g++
-          add-to-path: false
-      - name: Native Cygwin ABI and vectors
-        working-directory: source
-        shell: D:\cygwin\bin\bash.exe --noprofile --norc -eo pipefail -o igncr {0}
-        run: |
-          export PATH=/usr/bin:/bin
-          rustc -vV
-          test "$(rustc -vV | sed -n 's/^host: //p')" = x86_64-pc-cygwin
-          cargo test --target x86_64-pc-cygwin
-          cargo test --manifest-path test_vectors/Cargo.toml --target x86_64-pc-cygwin
+          name: jxl-1893-hosted-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/jxl-1893-evidence/
+          if-no-files-found: error
+          retention-days: 14
+
