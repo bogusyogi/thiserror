@@ -1,19 +1,18 @@
-name: JPEG XL hosted memory regression
+name: Brush stroke budget regression
 on:
   push:
     branches: [codex/contribution-checks]
 permissions:
   contents: read
 jobs:
-  jxl_memory_regression:
+  brush_1892_regression:
     if: github.event.repository.private == false
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       CARGO_INCREMENTAL: "1"
-      CANDIDATE_SHA: 16beb4db40eaac41e063583b18d24413a3d26b6f
-      PR_HEAD_SHA: 112e202fedbf578025b10d89a742365c35b90712
-      BASE_SHA: 0da998f24dfc03069d49867f8877af2bf7c51f94
+      CANDIDATE_SHA: 4d8f93585acbd4f20923250bd6de454ec1165f45
+      PR_HEAD_SHA: d770c5231377ccc1fd8c5c046665b6274ee8b3df
     steps:
       - name: Check out validation harness
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -30,22 +29,30 @@ jobs:
           path: ember
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0
-        with:
-          toolchain: 1.98.0
+      - name: Install and verify Rust 1.98.0
+        shell: bash
+        working-directory: ember
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/brush-1892-evidence"
+          rustup toolchain install 1.98.0 --profile minimal
+          rustup override set 1.98.0
+          rustc --version | tee "$RUNNER_TEMP/brush-1892-evidence/rustc-version.txt"
+          grep -Eq '^rustc 1\.98\.0([ -]|$)' "$RUNNER_TEMP/brush-1892-evidence/rustc-version.txt"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
           workspaces: ember
-          shared-key: lightcraft-jxl-1893-hosted
+          shared-key: lightcraft-brush-1892-hosted
           cache-on-failure: true
-      - name: Run before and after regression
+      - name: Run regression before and after fix
         shell: bash
-        run: bash harness/.github/scripts/validate-jxl-hosted.sh
-      - name: Upload logs and generated lock evidence
+        run: bash harness/.github/scripts/validate-brush-hosted.sh
+      - name: Upload regression evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: jxl-1893-hosted-evidence-${{ github.run_id }}
-          path: ${{ runner.temp }}/jxl-1893-evidence/
+          name: brush-1892-hosted-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/brush-1892-evidence/
           if-no-files-found: error
           retention-days: 14
 
