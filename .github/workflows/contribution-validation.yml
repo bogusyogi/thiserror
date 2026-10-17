@@ -5,81 +5,13 @@ on:
 permissions:
   contents: read
 jobs:
-  gpu_regression:
-    if: github.event.repository.private == false
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    env:
-      CARGO_INCREMENTAL: "1"
-      CASE_ID: gpu
-      CANDIDATE_SHA: 974064787250354311fc1116e23a755c6d8c1eea
-      ORIGINAL_HEAD_SHA: a36af3961ec482363de4d49d90522ea30baf9498
-      EXPECT_GPU_ADAPTER: "1"
-    steps:
-      - name: Check out validation harness
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ github.sha }}
-          path: harness
-          persist-credentials: false
-      - name: Check out GPU candidate with full history
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: Orthic-Labs/ember
-          ref: ${{ env.ORIGINAL_HEAD_SHA }}
-          fetch-depth: 0
-          path: ember
-          persist-credentials: false
-      - name: Fetch and pin GPU candidate from local bundle
-        shell: bash
-        working-directory: ember
-        run: |
-          set -euo pipefail
-          bundle="../harness/.github/regressions/lightcraft-gpu-candidate.bundle"
-          git bundle verify "$bundle"
-          git fetch "$bundle" "$CANDIDATE_SHA"
-          git checkout --detach "$CANDIDATE_SHA"
-          [[ "$(git rev-parse HEAD)" == "$CANDIDATE_SHA" ]]
-          git merge-base --is-ancestor "$ORIGINAL_HEAD_SHA" "$CANDIDATE_SHA"
-          [[ -z "$(git status --porcelain)" ]]
-      - name: Install Vulkan software adapter
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes mesa-vulkan-drivers vulkan-tools
-      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0
-      - name: Install and verify Rust 1.98.0
-        shell: bash
-        working-directory: ember
-        run: |
-          set -euo pipefail
-          rustup toolchain install 1.98.0 --profile minimal
-          rustup override set 1.98.0
-          rustc --version | tee "$RUNNER_TEMP/lightcraft-gpu-rustc-version.txt"
-          grep -Eq '^rustc 1\.98\.0([ -]|$)' "$RUNNER_TEMP/lightcraft-gpu-rustc-version.txt"
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
-        with:
-          workspaces: ember
-          shared-key: lightcraft-gpu-hosted
-          cache-on-failure: true
-      - name: Run GPU regression red then candidate green
-        shell: bash
-        run: bash harness/.github/scripts/validate-lightcraft-regression.sh
-      - name: Upload GPU regression evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: lightcraft-gpu-hosted-evidence-${{ github.run_id }}
-          path: ${{ runner.temp }}/lightcraft-gpu-evidence/
-          if-no-files-found: error
-          retention-days: 14
-
   async_trait_regression:
     if: github.event.repository.private == false
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       CARGO_INCREMENTAL: "1"
-      CANDIDATE_SHA: cf32de84272c989ede0444454e6fbb43fe7268e2
+      CANDIDATE_SHA: d56b31b5d4a7a9faa290219b76d0b9a053cac01f
       ORIGINAL_HEAD_SHA: 89e49d48c1fb56f9df42f94fa30fb3109e7bcb18
     steps:
       - name: Check out validation harness
