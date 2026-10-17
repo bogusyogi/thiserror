@@ -1,18 +1,19 @@
-name: Lightcraft reviewed regressions
+name: Lightcraft PR 1848 parameter OOM regression
 on:
   push:
     branches: [codex/contribution-checks]
 permissions:
   contents: read
 jobs:
-  async_trait_regression:
+  gpu_parameter_oom_regression:
     if: github.event.repository.private == false
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       CARGO_INCREMENTAL: "1"
-      CANDIDATE_SHA: d56b31b5d4a7a9faa290219b76d0b9a053cac01f
-      ORIGINAL_HEAD_SHA: 89e49d48c1fb56f9df42f94fa30fb3109e7bcb18
+      CASE_ID: gpu
+      CANDIDATE_SHA: c4bf9b7cfbd30345dd1294924ca773c3e5ca2978
+      ORIGINAL_HEAD_SHA: 974064787250354311fc1116e23a755c6d8c1eea
     steps:
       - name: Check out validation harness
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -20,22 +21,20 @@ jobs:
           ref: ${{ github.sha }}
           path: harness
           persist-credentials: false
-      - name: Check out async-trait candidate base with full history
+      - name: Check out reviewed Ember base with full history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          repository: bogusyogi/async-trait
+          repository: storytold/lightcraft
           ref: ${{ env.ORIGINAL_HEAD_SHA }}
           fetch-depth: 0
-          path: async-trait
+          path: ember
           persist-credentials: false
-      - name: Fetch and pin candidate from local bundle
+      - name: Fetch and pin PR candidate
         shell: bash
-        working-directory: async-trait
+        working-directory: ember
         run: |
           set -euo pipefail
-          bundle="../harness/.github/regressions/async-trait-candidate.bundle"
-          git bundle verify "$bundle"
-          git fetch "$bundle" "$CANDIDATE_SHA"
+          git fetch https://github.com/storytold/lightcraft.git refs/pull/1848/head
           git checkout --detach "$CANDIDATE_SHA"
           [[ "$(git rev-parse HEAD)" == "$CANDIDATE_SHA" ]]
           git merge-base --is-ancestor "$ORIGINAL_HEAD_SHA" "$CANDIDATE_SHA"
@@ -43,26 +42,31 @@ jobs:
       - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0
       - name: Install and verify Rust 1.98.0
         shell: bash
-        working-directory: async-trait
+        working-directory: ember
         run: |
           set -euo pipefail
           rustup toolchain install 1.98.0 --profile minimal
           rustup override set 1.98.0
-          rustc --version | tee "$RUNNER_TEMP/async-trait-rustc-version.txt"
-          grep -Eq '^rustc 1\.98\.0([ -]|$)' "$RUNNER_TEMP/async-trait-rustc-version.txt"
+          rustc --version | tee "$RUNNER_TEMP/lightcraft-gpu-rustc-version.txt"
+          grep -Eq '^rustc 1\.98\.0([ -]|$)' "$RUNNER_TEMP/lightcraft-gpu-rustc-version.txt"
+      - name: Install software Vulkan adapter
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes mesa-vulkan-drivers vulkan-tools
+          vulkaninfo --summary
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
-          workspaces: async-trait
-          shared-key: async-trait-issue-305-hosted
+          workspaces: ember
+          shared-key: lightcraft-gpu-hosted
           cache-on-failure: true
-      - name: Run async-trait issue 305 red then candidate green
+      - name: Run parameter allocation OOM red then green proof
         shell: bash
-        run: bash harness/.github/scripts/validate-async-trait-hosted.sh
-      - name: Upload async-trait regression evidence
+        run: bash harness/.github/scripts/validate-lightcraft-regression.sh
+      - name: Upload parameter OOM regression evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: async-trait-issue-305-evidence-${{ github.run_id }}
-          path: ${{ runner.temp }}/async-trait-issue-305-evidence/
+          name: lightcraft-pr-1848-parameter-oom-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/lightcraft-gpu-evidence/
           if-no-files-found: error
           retention-days: 14
