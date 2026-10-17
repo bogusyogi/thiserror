@@ -1,0 +1,107 @@
+--- a/crates/gpu/src/budget.rs
++++ b/crates/gpu/src/budget.rs
+@@ -35,8 +35,6 @@
+     used: u64,
+     /// Renders in flight.
+     running: u32,
+-    /// A retry holds the device exclusively until its permit drops.
+-    exclusive: bool,
+     /// Bytes renders may hold together now.
+     limit: u64,
+     /// What the budget grows back to.
+@@ -55,18 +53,17 @@
+ pub(crate) struct Permit<'a> {
+     budget: &'a Budget,
+     bytes: u64,
+-    alone: bool,
+ }
+ 
+ impl Budget {
+     pub fn new(ceiling: u64) -> Budget {
+         Budget {
+-            state: Mutex::new(State { used: 0, running: 0, exclusive: false, limit: ceiling, ceiling, queue: VecDeque::new(), next_ticket: 0 }),
++            state: Mutex::new(State { used: 0, running: 0, limit: ceiling, ceiling, queue: VecDeque::new(), next_ticket: 0 }),
+             room: Condvar::new(),
+         }
+     }
+ 
+-    /// Wait for room for `bytes`; `alone` holds the device exclusively (the retry of a
++    /// Wait for room for `bytes`; `alone` waits until nothing else is in flight (the retry of a
+     /// render that ran out of memory). `None` when `stop` turns true while waiting (the process is
+     /// ending): the caller renders on the CPU.
+     pub fn admit(&self, bytes: u64, alone: bool, stop: impl Fn() -> bool) -> Option<Permit<'_>> {
+@@ -74,7 +71,7 @@
+         let ticket = st.next_ticket;
+         st.next_ticket = st.next_ticket.wrapping_add(1);
+         st.queue.push_back(ticket);
+-        while st.queue.front() != Some(&ticket) || st.exclusive || (st.running > 0 && (alone || st.used.saturating_add(bytes) > st.limit)) {
++        while st.queue.front() != Some(&ticket) || (st.running > 0 && (alone || st.used.saturating_add(bytes) > st.limit)) {
+             if stop() {
+                 st.queue.retain(|t| *t != ticket);
+                 // the render behind may be the next to fit
+@@ -88,8 +85,7 @@
+         self.room.notify_all();
+         st.used = st.used.saturating_add(bytes);
+         st.running += 1;
+-        st.exclusive = alone;
+-        Some(Permit { budget: self, bytes, alone })
++        Some(Permit { budget: self, bytes })
+     }
+ 
+     /// A render ran out of device memory: halve the budget (not below what one render needs).
+@@ -117,9 +113,6 @@
+         let mut st = self.budget.state.lock().unwrap_or_else(PoisonError::into_inner);
+         st.used = st.used.saturating_sub(self.bytes);
+         st.running = st.running.saturating_sub(1);
+-        if self.alone {
+-            st.exclusive = false;
+-        }
+         self.budget.room.notify_all();
+     }
+ }
+--- a/crates/gpu/src/ctx.rs
++++ b/crates/gpu/src/ctx.rs
+@@ -475,31 +475,26 @@
+         // back a mapping of nothing when the device has no memory for it
+         let size = (bytes.len() as u64).next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT);
+         let buf = self.checked(size, || {
+-            let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
++            self.device.create_buffer(&wgpu::BufferDescriptor {
+                 label: None,
+                 size,
+                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+                 mapped_at_creation: false,
+-            });
+-            // write_buffer allocates its own staging memory. Keep that allocation inside the
+-            // same OOM scope: only a fully uploaded buffer may reach the pool or source cache.
+-            if simulated_upload_oom() {
+-                // Like wgpu's OOM, this is observed when the enclosing error scope pops, not
+-                // when write_buffer returns. Leaving the write outside checked must fail tests.
+-                PENDING_UPLOAD_OOM.with(|c| c.set(true));
+-            } else if bytes.len() as u64 == size {
+-                self.queue.write_buffer(&buf, 0, bytes);
+-            } else {
+-                // the queue copies whole 4-byte words
+-                let mut padded = bytes.to_vec();
+-                padded.resize(size as usize, 0);
+-                self.queue.write_buffer(&buf, 0, &padded);
+-            }
+-            buf
++            })
+         });
+         let Some(buf) = buf else {
+             return Buf { buf: Some(Tracked::new(self.placeholder())), len };
+         };
++        if simulated_upload_oom() {
++            PENDING_UPLOAD_OOM.with(|c| c.set(true));
++        } else if bytes.len() as u64 == size {
++            self.queue.write_buffer(&buf, 0, bytes);
++        } else {
++            // the queue copies whole 4-byte words
++            let mut padded = bytes.to_vec();
++            padded.resize(size as usize, 0);
++            self.queue.write_buffer(&buf, 0, &padded);
++        }
+         Buf { buf: Some(Tracked::new(buf)), len }
+     }
+ 
