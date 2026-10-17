@@ -1,0 +1,198 @@
+name: Contribution regression validation
+on:
+  push:
+    branches: [codex/contribution-checks]
+permissions:
+  contents: read
+jobs:
+  bindgen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    if: github.event.repository.private == false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bogusyogi/rust-bindgen
+          ref: b1b1c6a7b300e168390a690725ce926d6399d0fd
+          path: source
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+      - name: Install libclang
+        working-directory: source
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
+      - name: Token and macro regressions
+        working-directory: source
+        shell: bash
+        run: |
+          cargo test -p bindgen --lib token_line_continuations
+          cargo test -p bindgen-tests --test tests macro
+  ureq:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    if: github.event.repository.private == false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bogusyogi/ureq-proto
+          ref: 3d394ac4d955749cbccfcde10ef389820f415a77
+          path: ureq-proto
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bogusyogi/ureq
+          ref: 7db8b56be06347cae17f58f2037aa14919b8fb85
+          path: ureq
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+      - name: Protocol tests
+        working-directory: ureq-proto
+        shell: bash
+        run: |
+          cargo test --all-features
+      - name: Client integration against protocol patch
+        working-directory: ureq
+        shell: bash
+        run: |
+          cargo --config 'patch.crates-io.ureq-proto.path="../ureq-proto"' test --lib
+  objc2:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    if: github.event.repository.private == false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bogusyogi/objc2
+          ref: e52529baa0991e90b8c392d89de90294dbd83e82
+          path: source
+          persist-credentials: false
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+      - name: Native rectangle differential regression
+        working-directory: source
+        shell: bash
+        run: |
+          cargo test -p objc2-core-graphics --no-default-features --features std,CGGeometry --test geometry
+          cargo test -p objc2-core-graphics --test geometry
+          cargo test -p objc2-core-foundation --no-default-features --features std,CFCGTypes geometry
+          cargo test -p objc2-core-foundation --no-default-features --features std,CFCGTypes --doc
+  core_749:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    if: github.event.repository.private == false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bogusyogi/core-foundation-rs
+          ref: 9f3b79db9123da10ea40a37885af491d5f7a4dea
+          path: source
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+      - name: Native FFI regression
+        working-directory: source
+        shell: bash
+        run: |
+          cargo test -p core-text vertical_translations_for_glyphs
+  core_685:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    if: github.event.repository.private == false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bogusyogi/core-foundation-rs
+          ref: 205c482ea20f6fc73f56d3f5524d2c423fbd3940
+          path: source
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+      - name: Native FFI regression
+        working-directory: source
+        shell: bash
+        run: |
+          cargo test -p core-foundation-sys calendar_identifier_and_locale
+  cpal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    if: github.event.repository.private == false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bogusyogi/cpal
+          ref: 57b4bca7cb2e109baa650788ec88ccc2b676b153
+          path: source
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Compile WebAudio with both panic strategies
+        working-directory: source
+        shell: bash
+        run: |
+          RUSTFLAGS="-C panic=abort" cargo +stable check --target wasm32-unknown-unknown --features wasm-bindgen --lib
+          RUSTFLAGS="-C panic=unwind" cargo +stable check --target wasm32-unknown-unknown --features wasm-bindgen --lib
+  blake3:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    if: github.event.repository.private == false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bogusyogi/BLAKE3
+          ref: d9ff95c098d65002c35dfbff423d9a78086658cd
+          path: source
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+      - name: Windows ABI dispatch and official vectors
+        working-directory: source
+        shell: bash
+        run: |
+          cargo test
+          cargo test --manifest-path test_vectors/Cargo.toml
+  thiserror_red:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    if: github.event.repository.private == false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bogusyogi/thiserror
+          ref: 5ef74f784c535b860eb1f476f1f89045d8fd2b85
+          path: source
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+      - name: Require reproduced compiler error
+        working-directory: source
+        shell: bash
+        run: |
+          set +e
+          cargo test --test test_generics test_recursive_generic_source > regression.log 2>&1
+          status=$?
+          set -e
+          cat regression.log
+          test "$status" -ne 0
+          grep -q 'E0275' regression.log
+  async_trait_red:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    if: github.event.repository.private == false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bogusyogi/async-trait
+          ref: 6b43d36668de0acb652ecbc1b24eeb9d7974bd9f
+          path: source
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+      - name: Require reproduced compiler error
+        working-directory: source
+        shell: bash
+        run: |
+          set +e
+          cargo test --test test test_elided_and_explicit_input_lifetimes > regression.log 2>&1
+          status=$?
+          set -e
+          cat regression.log
+          test "$status" -ne 0
+          grep -q 'E0195' regression.log
