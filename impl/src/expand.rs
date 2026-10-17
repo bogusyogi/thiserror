@@ -45,13 +45,8 @@ fn impl_struct(input: Struct) -> TokenStream {
     } else if let Some(source_field) = input.source_field() {
         let source = &source_field.member;
         if source_field.contains_generic {
-            let source_ty = type_parameter_of_option(source_field.ty).unwrap_or(source_field.ty);
-            let bound = if is_recursive_source(source_ty, &input.ident, &ty_generics) {
-                quote!('static)
-            } else {
-                quote!(::thiserror::#private::Error + 'static)
-            };
-            error_inferred_bounds.insert(source_ty, bound);
+            let ty = unoptional_type(source_field.ty);
+            error_inferred_bounds.insert(ty, quote!(::thiserror::#private::Error + 'static));
         }
         let asref = if type_is_option(source_field.ty) {
             Some(quote_spanned!(source.span()=> .as_ref()?))
@@ -247,13 +242,8 @@ fn impl_enum(input: Enum) -> TokenStream {
             } else if let Some(source_field) = variant.source_field() {
                 let source = &source_field.member;
                 if source_field.contains_generic {
-                    let source_ty = type_parameter_of_option(source_field.ty).unwrap_or(source_field.ty);
-                    let bound = if is_recursive_source(source_ty, &input.ident, &ty_generics) {
-                        quote!('static)
-                    } else {
-                        quote!(::thiserror::#private::Error + 'static)
-                    };
-                    error_inferred_bounds.insert(source_ty, bound);
+                    let ty = unoptional_type(source_field.ty);
+                    error_inferred_bounds.insert(ty, quote!(::thiserror::#private::Error + 'static));
                 }
                 let asref = if type_is_option(source_field.ty) {
                     Some(quote_spanned!(source.span()=> .as_ref()?))
@@ -576,50 +566,6 @@ fn from_initializer(
 
 fn type_is_option(ty: &Type) -> bool {
     type_parameter_of_option(ty).is_some()
-}
-
-// Avoid requiring the Error impl being generated as its own prerequisite.
-// Keep the outlives bound: source() returns a 'static error trait object.
-fn is_recursive_source(ty: &Type, ident: &Ident, generics: &syn::TypeGenerics) -> bool {
-    match ty {
-        Type::Group(ty) => is_recursive_source(&ty.elem, ident, generics),
-        Type::Paren(ty) => is_recursive_source(&ty.elem, ident, generics),
-        Type::Path(ty) if ty.qself.is_none() => {
-            let path = &ty.path;
-            if path.leading_colon.is_none() && path.segments.len() == 1 {
-                let segment = &path.segments[0];
-                if segment.ident == "Self" && segment.arguments.is_none() {
-                    return true;
-                }
-                if segment.ident == *ident
-                    && segment.arguments.to_token_stream().to_string()
-                        == generics.to_token_stream().to_string()
-                {
-                    return true;
-                }
-            }
-            let names: Vec<_> = path
-                .segments
-                .iter()
-                .map(|segment| segment.ident.to_string())
-                .collect();
-            if names != ["Box"]
-                && names != ["std", "boxed", "Box"]
-                && names != ["alloc", "boxed", "Box"]
-            {
-                return false;
-            }
-            let arguments = match &path.segments.last().unwrap().arguments {
-                PathArguments::AngleBracketed(arguments) if arguments.args.len() == 1 => arguments,
-                _ => return false,
-            };
-            match &arguments.args[0] {
-                GenericArgument::Type(ty) => is_recursive_source(ty, ident, generics),
-                _ => false,
-            }
-        }
-        _ => false,
-    }
 }
 
 fn unoptional_type(ty: &Type) -> TokenStream {
