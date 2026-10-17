@@ -1,0 +1,11 @@
+--- a/crates/gpu/src/ctx.rs
++++ b/crates/gpu/src/ctx.rs
+@@ -296,7 +296,7 @@
+         )
+         .map_err(|e| format!("no GPU adapter among {backends:?} ({e})"))?;
+         let info = adapter.get_info();
+-        if info.device_type == wgpu::DeviceType::Cpu {
++        if info.device_type == wgpu::DeviceType::Cpu && std::env::var_os("LIGHTCRAFT_ALLOW_SOFTWARE_GPU").is_none() {
+             log::info!("gpu: only a software adapter ({}), using the CPU pipeline", info.name);
+             return Err(format!("software adapter ({}) skipped: the CPU pipeline is faster", info.name));
+         }

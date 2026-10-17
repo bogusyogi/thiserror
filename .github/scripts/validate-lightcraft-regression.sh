@@ -19,23 +19,19 @@ config="$harness/.github/regressions/lightcraft-${CASE_ID}.sh"
 mkdir -p "$evidence"
 [[ -f "$config" ]] || fail "missing case config $config; regression details must be supplied before integration"
 
-# Case config contract. It must define:
-#   SOURCE_PATHS=(... tracked source files whose bytes are material to this regression ...)
-#   RED_PATCH_FILE=... (unified diff relative to harness; must only change production behavior)
-#   run_preflight             (GPU must prove a working Vulkan adapter; HDR may be a no-op)
-#   verify_test_survives_red  (prove candidate regression test remains present after patch)
-#   run_regression_tests red|green
-#   verify_red_failure LOG    (prove expected assertion failed, including exact failure count)
-#   verify_no_adapter_skip LOG (GPU must reject adapter/no-device skips; HDR may be a no-op)
+# Case config defines source paths, patches and proof hooks for this regression.
 source "$config"
-for required in SOURCE_PATHS RED_PATCH_FILE; do
+for required in SOURCE_PATHS RED_PATCH_FILE HOSTED_QUALIFICATION_PATCH_FILE; do
   declare -p "$required" >/dev/null 2>&1 || fail "case config must define $required"
 done
-for required_fn in run_preflight verify_test_survives_red run_regression_tests verify_red_failure verify_no_adapter_skip; do
+for required_fn in run_preflight prepare_hosted_qualification verify_hosted_qualification clear_hosted_qualification verify_test_survives_red run_regression_tests verify_red_failure verify_no_adapter_skip; do
   declare -F "$required_fn" >/dev/null || fail "case config must implement $required_fn"
 done
 [[ "${#SOURCE_PATHS[@]}" -gt 0 ]] || fail 'SOURCE_PATHS must list at least one source file'
 [[ -f "$harness/$RED_PATCH_FILE" ]] || fail "missing red patch $harness/$RED_PATCH_FILE"
+if [[ -n "$HOSTED_QUALIFICATION_PATCH_FILE" ]]; then
+  [[ -f "$harness/$HOSTED_QUALIFICATION_PATCH_FILE" ]] || fail "missing hosted qualification patch $harness/$HOSTED_QUALIFICATION_PATCH_FILE"
+fi
 
 cd "$repo"
 git cat-file -e "$CANDIDATE_SHA^{commit}" 2>/dev/null || fail 'candidate commit is missing from full-history checkout'
@@ -57,47 +53,89 @@ hash_sources() {
   done
   sha256sum Cargo.lock >> "$out"
 }
-hash_sources "$evidence/source-lock-hashes.before.txt"
+hash_sources "$evidence/source-lock-hashes.candidate.txt"
 cp Cargo.lock "$RUNNER_TEMP/lightcraft-${CASE_ID}-Cargo.lock.candidate"
-run_preflight > "$evidence/preflight.log" 2>&1 || { tail -n 120 "$evidence/preflight.log" >&2; fail 'preflight failed'; }
 
-patch_applied=0
-restore_candidate() {
-  if [[ "$patch_applied" == 1 ]]; then
+red_applied=0
+qualification_applied=0
+restore_red_transformation() {
+  if [[ "$red_applied" == 1 ]]; then
     git -C "$repo" apply --reverse "$harness/$RED_PATCH_FILE" || return 1
-    patch_applied=0
-    hash_sources "$evidence/source-lock-hashes.restored.txt"
-    cmp -s "$evidence/source-lock-hashes.before.txt" "$evidence/source-lock-hashes.restored.txt" || return 1
-    [[ -z "$(git -C "$repo" status --porcelain)" ]] || return 1
-    printf 'candidate bytes restored and working tree clean\n' > "$evidence/restore-result.txt"
+    red_applied=0
+    verify_hosted_qualification || return 1
+    hash_sources "$evidence/source-lock-hashes.red-restored.txt"
+    cmp -s "$evidence/source-lock-hashes.qualification-active.txt" "$evidence/source-lock-hashes.red-restored.txt" || return 1
+    printf 'red production transformation reversed; hosted qualification remains active\n' > "$evidence/red-restore-result.txt"
   fi
 }
-trap 'restore_candidate || printf "ERROR: candidate restoration failed\n" >&2' EXIT
+restore_all_mutations() {
+  restore_red_transformation || return 1
+  if [[ "$qualification_applied" == 1 ]]; then
+    git -C "$repo" apply --reverse "$harness/$HOSTED_QUALIFICATION_PATCH_FILE" || return 1
+    qualification_applied=0
+  fi
+  clear_hosted_qualification || return 1
+  verify_hosted_qualification || return 1
+  hash_sources "$evidence/source-lock-hashes.candidate-restored.txt"
+  cmp -s "$evidence/source-lock-hashes.candidate.txt" "$evidence/source-lock-hashes.candidate-restored.txt" || return 1
+  [[ -z "$(git -C "$repo" status --porcelain)" ]] || return 1
+  printf 'candidate source and lock bytes restored; working tree clean\n' > "$evidence/candidate-restore-result.txt"
+}
+on_exit() {
+  local status=$?
+  trap - EXIT
+  if ! restore_all_mutations; then
+    printf 'ERROR: candidate restoration failed\n' >&2
+    status=1
+  fi
+  exit "$status"
+}
+trap on_exit EXIT
 
-git apply --check "$harness/$RED_PATCH_FILE" || fail 'red patch does not apply cleanly to candidate'
+run_preflight > "$evidence/preflight.log" 2>&1 || { tail -n 120 "$evidence/preflight.log" >&2; fail 'preflight failed'; }
+if [[ -n "$HOSTED_QUALIFICATION_PATCH_FILE" ]]; then
+  git apply --check "$harness/$HOSTED_QUALIFICATION_PATCH_FILE" || fail 'hosted qualification patch does not apply cleanly to candidate'
+  git apply "$harness/$HOSTED_QUALIFICATION_PATCH_FILE"
+  qualification_applied=1
+  sha256sum "$harness/$HOSTED_QUALIFICATION_PATCH_FILE" > "$evidence/qualification-patch.sha256"
+  git diff --unified=0 -- crates/gpu/src/ctx.rs > "$evidence/qualification.diff"
+  printf 'mode=hosted-software-adapter-qualification\npatch=%s\nred_and_green_use_qualified_source=true\n' "$HOSTED_QUALIFICATION_PATCH_FILE" > "$evidence/qualification-mode.txt"
+else
+  printf 'mode=none\n' > "$evidence/qualification-mode.txt"
+fi
+prepare_hosted_qualification || fail 'hosted qualification setup failed'
+verify_hosted_qualification || fail 'hosted qualification diff is not the exact configured mutation'
+hash_sources "$evidence/source-lock-hashes.qualification-active.txt"
+
+[[ -z "$(git -C "$repo" diff --check)" ]] || fail 'candidate qualification diff has whitespace errors'
+git apply --check "$harness/$RED_PATCH_FILE" || fail 'red patch does not apply cleanly to qualified candidate'
 git apply "$harness/$RED_PATCH_FILE"
-patch_applied=1
-verify_test_survives_red || fail 'candidate regression test did not survive red transformation'
+red_applied=1
+verify_test_survives_red || fail 'candidate regression test or fault injection did not survive red transformation'
 set +e
 run_regression_tests red > "$evidence/red.log" 2>&1
 red_status=$?
 set -e
 printf '%s\n' "$red_status" > "$evidence/red-exit.txt"
-(( red_status != 0 )) || fail 'red regression unexpectedly passed'
+(( red_status != 0 )) || fail 'red regressions unexpectedly passed'
 verify_no_adapter_skip "$evidence/red.log" || fail 'red run skipped because adapter/device was unavailable'
-verify_red_failure "$evidence/red.log" || { tail -n 120 "$evidence/red.log" >&2; fail 'red log did not prove the expected assertion failure'; }
-printf 'expected regression assertion failed (exit %s)\n' "$red_status" > "$evidence/red-result.txt"
+verify_red_failure "$evidence/red.log" || { tail -n 120 "$evidence/red.log" >&2; fail 'red log did not prove the expected assertion failures'; }
+printf 'expected regression assertions failed (exit %s) under hosted qualification\n' "$red_status" > "$evidence/red-result.txt"
 
-restore_candidate || fail 'candidate restoration failed before green run'
-trap - EXIT
+restore_red_transformation || fail 'red transformation restore failed before green run'
 set +e
 run_regression_tests green > "$evidence/green.log" 2>&1
 green_status=$?
 set -e
 printf '%s\n' "$green_status" > "$evidence/green-exit.txt"
-(( green_status == 0 )) || { tail -n 120 "$evidence/green.log" >&2; fail 'candidate green validation failed'; }
+(( green_status == 0 )) || { tail -n 120 "$evidence/green.log" >&2; fail 'qualified candidate green validation failed'; }
 verify_no_adapter_skip "$evidence/green.log" || fail 'green run skipped because adapter/device was unavailable'
+printf 'candidate regressions passed under hosted qualification; temporary admission mutation will now be reverted\n' > "$evidence/green-result.txt"
+
+restore_all_mutations || fail 'hosted qualification restore failed after green run'
+trap - EXIT
 hash_sources "$evidence/source-lock-hashes.after.txt"
-cmp -s "$evidence/source-lock-hashes.before.txt" "$evidence/source-lock-hashes.after.txt" || fail 'candidate source or Cargo.lock bytes changed during validation'
+cmp -s "$evidence/source-lock-hashes.candidate.txt" "$evidence/source-lock-hashes.after.txt" || fail 'candidate source or Cargo.lock bytes differ after validation'
 cmp -s "$RUNNER_TEMP/lightcraft-${CASE_ID}-Cargo.lock.candidate" Cargo.lock || fail 'Cargo.lock changed during --locked validation'
-printf 'candidate regression suite passed (exit 0); candidate source and Cargo.lock hashes unchanged\n' > "$evidence/green-result.txt"
+git status --porcelain=v1 > "$evidence/status-after.txt"
+printf 'source and Cargo.lock hashes equal original candidate bytes after all validation stages\n' > "$evidence/lock-result.txt"

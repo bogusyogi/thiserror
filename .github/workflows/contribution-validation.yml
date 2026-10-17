@@ -73,16 +73,14 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  hdr_regression:
+  async_trait_regression:
     if: github.event.repository.private == false
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       CARGO_INCREMENTAL: "1"
-      CASE_ID: hdr
-      CANDIDATE_SHA: a6ab093e834efe4cd0f60150ede9bf80cd5bbdb4
-      ORIGINAL_HEAD_SHA: 6459531cfb967943359d415c60a6570000c304af
-      EXPECT_GPU_ADAPTER: "0"
+      CANDIDATE_SHA: cf32de84272c989ede0444454e6fbb43fe7268e2
+      ORIGINAL_HEAD_SHA: 89e49d48c1fb56f9df42f94fa30fb3109e7bcb18
     steps:
       - name: Check out validation harness
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -90,20 +88,20 @@ jobs:
           ref: ${{ github.sha }}
           path: harness
           persist-credentials: false
-      - name: Check out HDR candidate with full history
+      - name: Check out async-trait candidate base with full history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          repository: Orthic-Labs/ember
+          repository: bogusyogi/async-trait
           ref: ${{ env.ORIGINAL_HEAD_SHA }}
           fetch-depth: 0
-          path: ember
+          path: async-trait
           persist-credentials: false
       - name: Fetch and pin candidate from local bundle
         shell: bash
-        working-directory: ember
+        working-directory: async-trait
         run: |
           set -euo pipefail
-          bundle="../harness/.github/regressions/lightcraft-${CASE_ID}-candidate.bundle"
+          bundle="../harness/.github/regressions/async-trait-candidate.bundle"
           git bundle verify "$bundle"
           git fetch "$bundle" "$CANDIDATE_SHA"
           git checkout --detach "$CANDIDATE_SHA"
@@ -113,26 +111,26 @@ jobs:
       - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0
       - name: Install and verify Rust 1.98.0
         shell: bash
-        working-directory: ember
+        working-directory: async-trait
         run: |
           set -euo pipefail
           rustup toolchain install 1.98.0 --profile minimal
           rustup override set 1.98.0
-          rustc --version | tee "$RUNNER_TEMP/lightcraft-hdr-rustc-version.txt"
-          grep -Eq '^rustc 1\.98\.0([ -]|$)' "$RUNNER_TEMP/lightcraft-hdr-rustc-version.txt"
+          rustc --version | tee "$RUNNER_TEMP/async-trait-rustc-version.txt"
+          grep -Eq '^rustc 1\.98\.0([ -]|$)' "$RUNNER_TEMP/async-trait-rustc-version.txt"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
-          workspaces: ember
-          shared-key: lightcraft-hdr-hosted
+          workspaces: async-trait
+          shared-key: async-trait-issue-305-hosted
           cache-on-failure: true
-      - name: Run HDR regression red then candidate green
+      - name: Run async-trait issue 305 red then candidate green
         shell: bash
-        run: bash harness/.github/scripts/validate-lightcraft-regression.sh
-      - name: Upload HDR regression evidence
+        run: bash harness/.github/scripts/validate-async-trait-hosted.sh
+      - name: Upload async-trait regression evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: lightcraft-hdr-hosted-evidence-${{ github.run_id }}
-          path: ${{ runner.temp }}/lightcraft-hdr-evidence/
+          name: async-trait-issue-305-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/async-trait-issue-305-evidence/
           if-no-files-found: error
           retention-days: 14

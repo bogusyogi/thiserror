@@ -8,8 +8,33 @@ SOURCE_PATHS=(
   crates/gpu/tests/fallback.rs
 )
 RED_PATCH_FILE='.github/regressions/lightcraft-gpu-red.patch'
+HOSTED_QUALIFICATION_PATCH_FILE='.github/regressions/lightcraft-gpu-software-admission.patch'
 budget_test='an_active_retry_excludes_later_renders_until_its_permit_drops'
 upload_test='upload_staging_oom_does_not_cache_an_unwritten_shared_source'
+
+prepare_hosted_qualification() {
+  export LIGHTCRAFT_ALLOW_SOFTWARE_GPU=1
+  printf 'admission=temporary env-gated CPU Vulkan device admission\n' >> "$evidence/qualification-mode.txt"
+  grep -m1 -E 'deviceName[[:space:]]*=' "$evidence/vulkaninfo-summary.txt" >> "$evidence/qualification-mode.txt"
+}
+
+verify_hosted_qualification() {
+  if [[ "${qualification_applied:-0}" == 1 ]]; then
+    [[ "${LIGHTCRAFT_ALLOW_SOFTWARE_GPU:-}" == 1 ]] || return 1
+    [[ "$(git diff --name-only)" == 'crates/gpu/src/ctx.rs' ]] || return 1
+    [[ "$(git diff --numstat)" == $'1\t1\tcrates/gpu/src/ctx.rs' ]] || return 1
+    local expected actual
+    expected=$'-        if info.device_type == wgpu::DeviceType::Cpu {\n+        if info.device_type == wgpu::DeviceType::Cpu && std::env::var_os("LIGHTCRAFT_ALLOW_SOFTWARE_GPU").is_none() {'
+    actual="$(git diff --unified=0 -- crates/gpu/src/ctx.rs | grep -E '^[+-][^+-]' || true)"
+    [[ "$actual" == "$expected" ]]
+  else
+    [[ -z "${LIGHTCRAFT_ALLOW_SOFTWARE_GPU:-}" ]] && [[ -z "$(git diff --name-only)" ]]
+  fi
+}
+
+clear_hosted_qualification() {
+  unset LIGHTCRAFT_ALLOW_SOFTWARE_GPU
+}
 
 run_preflight() {
   local summary="$evidence/vulkaninfo-summary.txt"

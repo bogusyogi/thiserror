@@ -5,7 +5,12 @@ SOURCE_PATHS=(
   crates/engine/src/tests_merge.rs
 )
 RED_PATCH_FILE='.github/regressions/lightcraft-hdr-red.patch'
+HOSTED_QUALIFICATION_PATCH_FILE=''
 regression_name='hdr_merge_does_not_reuse_a_deleted_result_path_for_a_new_result'
+
+prepare_hosted_qualification() { :; }
+verify_hosted_qualification() { [[ -z "$(git diff --name-only)" ]]; }
+clear_hosted_qualification() { :; }
 
 run_preflight() {
   # HDR path regression does not require a GPU adapter.
