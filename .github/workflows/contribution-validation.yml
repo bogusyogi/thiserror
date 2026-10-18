@@ -12,7 +12,7 @@ jobs:
     env:
       CARGO_INCREMENTAL: "1"
       CASE_ID: hdr
-      CANDIDATE_SHA: ab74cca76056e2baec5cbc0818f9e1b1c90ddbf8
+      CANDIDATE_SHA: b017b6c6969f841db507caaca0eec710a9b84eb1
       ORIGINAL_HEAD_SHA: a6ab093e834efe4cd0f60150ede9bf80cd5bbdb4
     steps:
       - name: Check out validation harness
