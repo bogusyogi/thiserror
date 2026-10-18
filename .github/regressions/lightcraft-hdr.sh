@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# HDR PR 435. This case stays disabled by the shared runner until its exact red patch is staged.
+# HDR PR 435: stale matching stored sources must trigger a fresh fallback import.
 SOURCE_PATHS=(
   crates/engine/src/merge.rs
   crates/engine/src/tests_merge.rs
 )
 RED_PATCH_FILE='.github/regressions/lightcraft-hdr-red.patch'
 HOSTED_QUALIFICATION_PATCH_FILE=''
-regression_name='hdr_merge_does_not_reuse_a_deleted_result_path_for_a_new_result'
+regression_name='hdr_merge_fresh_imports_when_matching_stored_hash_has_stale_source'
 
 prepare_hosted_qualification() { :; }
 verify_hosted_qualification() { [[ -z "$(git diff --name-only)" ]]; }
@@ -20,7 +20,7 @@ run_preflight() {
 verify_test_survives_red() {
   local test_file='crates/engine/src/tests_merge.rs'
   grep -Fq "fn ${regression_name}()" "$test_file" || return 1
-  # Red patch must transform merge production behavior only; keep regression code byte-identical.
+  # Red transformation touches production behavior only; keep test bytes identical.
   [[ "$(git diff --name-only)" == 'crates/engine/src/merge.rs' ]] || return 1
   git diff --quiet -- "$test_file"
 }
@@ -46,15 +46,13 @@ verify_red_failure() {
   local log="${1:?red log is required}"
   grep -Fq "$regression_name" "$log" || return 1
   grep -Eq '^test result: FAILED\. 0 passed; 1 failed; 0 ignored;' "$log" || return 1
-  # Original merge restores the deleted row, then its import fails; unwrap must expose that failure.
-  grep -Fq 'called `Result::unwrap()` on an `Err` value' "$log" || return 1
-  grep -Fq 'could not be imported' "$log" || return 1
+  grep -Fq 'existing merge result' "$log" || return 1
+  grep -Fq 'missing or changed' "$log" || return 1
   grep -Eq 'panicked at .*tests_merge\.rs:' "$log"
 }
 
 verify_no_adapter_skip() {
   local log="${1:?log is required}"
-  # HDR test does not use the GPU. Also prove red targeted one test and green ran both commands.
   grep -Fq "$regression_name" "$log" || return 1
   ! grep -Eiq 'no (supported )?adapters?|no devices? found|skipped because.*(adapter|device)' "$log" || return 1
   if grep -Fq 'test result: FAILED.' "$log"; then

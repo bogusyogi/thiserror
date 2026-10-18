@@ -1,19 +1,19 @@
-name: Lightcraft PR 1848 parameter OOM regression
+name: Lightcraft HDR fresh fallback regression
 on:
   push:
     branches: [codex/contribution-checks]
 permissions:
   contents: read
 jobs:
-  gpu_parameter_oom_regression:
+  hdr_fresh_fallback_regression:
     if: github.event.repository.private == false
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       CARGO_INCREMENTAL: "1"
-      CASE_ID: gpu
-      CANDIDATE_SHA: c4bf9b7cfbd30345dd1294924ca773c3e5ca2978
-      ORIGINAL_HEAD_SHA: 974064787250354311fc1116e23a755c6d8c1eea
+      CASE_ID: hdr
+      CANDIDATE_SHA: ab74cca76056e2baec5cbc0818f9e1b1c90ddbf8
+      ORIGINAL_HEAD_SHA: a6ab093e834efe4cd0f60150ede9bf80cd5bbdb4
     steps:
       - name: Check out validation harness
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -21,7 +21,7 @@ jobs:
           ref: ${{ github.sha }}
           path: harness
           persist-credentials: false
-      - name: Check out reviewed Ember base with full history
+      - name: Check out HDR PR base with full history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: storytold/lightcraft
@@ -29,12 +29,14 @@ jobs:
           fetch-depth: 0
           path: ember
           persist-credentials: false
-      - name: Fetch and pin PR candidate
+      - name: Fetch and pin HDR PR candidate
         shell: bash
         working-directory: ember
         run: |
           set -euo pipefail
-          git fetch https://github.com/storytold/lightcraft.git refs/pull/1848/head
+          bundle="../harness/.github/regressions/lightcraft-hdr-candidate.bundle"
+          git bundle verify "$bundle"
+          git fetch "$bundle" "$CANDIDATE_SHA"
           git checkout --detach "$CANDIDATE_SHA"
           [[ "$(git rev-parse HEAD)" == "$CANDIDATE_SHA" ]]
           git merge-base --is-ancestor "$ORIGINAL_HEAD_SHA" "$CANDIDATE_SHA"
@@ -47,26 +49,21 @@ jobs:
           set -euo pipefail
           rustup toolchain install 1.98.0 --profile minimal
           rustup override set 1.98.0
-          rustc --version | tee "$RUNNER_TEMP/lightcraft-gpu-rustc-version.txt"
-          grep -Eq '^rustc 1\.98\.0([ -]|$)' "$RUNNER_TEMP/lightcraft-gpu-rustc-version.txt"
-      - name: Install software Vulkan adapter
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes mesa-vulkan-drivers vulkan-tools
-          vulkaninfo --summary
+          rustc --version | tee "$RUNNER_TEMP/lightcraft-hdr-rustc-version.txt"
+          grep -Eq '^rustc 1\.98\.0([ -]|$)' "$RUNNER_TEMP/lightcraft-hdr-rustc-version.txt"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
           workspaces: ember
-          shared-key: lightcraft-gpu-hosted
+          shared-key: lightcraft-hdr-hosted
           cache-on-failure: true
-      - name: Run parameter allocation OOM red then green proof
+      - name: Run HDR fresh fallback red then green proof
         shell: bash
         run: bash harness/.github/scripts/validate-lightcraft-regression.sh
-      - name: Upload parameter OOM regression evidence
+      - name: Upload HDR regression evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: lightcraft-pr-1848-parameter-oom-evidence-${{ github.run_id }}
-          path: ${{ runner.temp }}/lightcraft-gpu-evidence/
+          name: lightcraft-hdr-fresh-fallback-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/lightcraft-hdr-evidence/
           if-no-files-found: error
           retention-days: 14
