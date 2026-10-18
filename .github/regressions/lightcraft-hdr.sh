@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
-# HDR PR 435: stale matching stored sources must trigger a fresh fallback import.
+# HDR PR435: byte-identical Local result must be reused & promoted, undoably.
+# Existing workflow pins previous checked HDR head as bootstrap. Select the next
+# exact bundled candidate here; shared runner records these pins in evidence.
+[[ "$CANDIDATE_SHA" == b017b6c6969f841db507caaca0eec710a9b84eb1 ]] || fail 'unexpected HDR bootstrap pin'
+git -C "$repo" fetch "$harness/.github/regressions/lightcraft-hdr-candidate.bundle" 94729f85b8076f22e2848cae6ab5b2de677e4d17
+git -C "$repo" checkout --detach 94729f85b8076f22e2848cae6ab5b2de677e4d17
+ORIGINAL_HEAD_SHA=b017b6c6969f841db507caaca0eec710a9b84eb1
+CANDIDATE_SHA=94729f85b8076f22e2848cae6ab5b2de677e4d17
+git -C "$repo" merge-base --is-ancestor "$ORIGINAL_HEAD_SHA" "$CANDIDATE_SHA"
+
+
 SOURCE_PATHS=(
   crates/engine/src/merge.rs
   crates/engine/src/tests_merge.rs
 )
 RED_PATCH_FILE='.github/regressions/lightcraft-hdr-red.patch'
 HOSTED_QUALIFICATION_PATCH_FILE=''
-regression_name='hdr_merge_fresh_imports_when_matching_stored_hash_has_stale_source'
+regression_name='hdr_merge_command_creates_and_imports_a_dng'
 
 prepare_hosted_qualification() { :; }
 verify_hosted_qualification() { [[ -z "$(git diff --name-only)" ]]; }
@@ -46,8 +56,7 @@ verify_red_failure() {
   local log="${1:?red log is required}"
   grep -Fq "$regression_name" "$log" || return 1
   grep -Eq '^test result: FAILED\. 0 passed; 1 failed; 0 ignored;' "$log" || return 1
-  grep -Fq 'existing merge result' "$log" || return 1
-  grep -Fq 'missing or changed' "$log" || return 1
+  grep -Fq 'assertion failed: !s.catalog.photo(id).unwrap().local' "$log" || return 1
   grep -Eq 'panicked at .*tests_merge\.rs:' "$log"
 }
 

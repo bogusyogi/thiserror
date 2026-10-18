@@ -1,23 +1,50 @@
-diff --git a/crates/engine/src/merge.rs b/crates/engine/src/merge.rs
 --- a/crates/engine/src/merge.rs
 +++ b/crates/engine/src/merge.rs
-@@ -460,6 +460,19 @@
+@@ -10,7 +10,7 @@
+ 
+ use std::sync::Arc;
+ 
+-use lightcraft_catalog::{Op, PhotoId, Source};
++use lightcraft_catalog::{PhotoId, Source};
+ use lightcraft_develop::DevelopSettings;
+ use lightcraft_merge::pano::MAX_MEGAPIXELS;
+ use lightcraft_merge::{Deghost, Frame, HdrOptions, PanoOptions, Projection};
+@@ -446,7 +446,7 @@
+                 Some(read) => read(path).ok(),
+                 None => std::fs::read(path).ok(),
+             };
+-            bytes.is_some_and(|bytes| lightcraft_preview::hash_bytes(&bytes).to_string() == output_hash).then(|| (p.id, path.clone(), p.local))
++            bytes.is_some_and(|bytes| lightcraft_preview::hash_bytes(&bytes).to_string() == output_hash).then(|| (p.id, path.clone()))
+         });
+         // A missing or deleted catalog row still owns its path. Do not let a new merge
+         // publish there: import may otherwise restore that row instead of adding this result.
+@@ -458,8 +458,8 @@
+                 _ => None,
+             })
              .collect();
-         let (id, path, reused) = if let Some((id, path)) = valid_existing {
-             (id, path, true)
-+        } else if let Some((id, path, deleted)) = self.catalog.photos().find_map(|p| {
-+            if p.content_hash.as_deref() != Some(output_hash.as_str()) {
-+                return None;
-+            }
-+            let Source::File { path } = &p.source else {
-+                return None;
-+            };
-+            Some((p.id, path.clone(), p.deleted))
-+        }) {
-+            let state = if deleted { "deleted" } else { "missing or changed" };
-+            return Err(EngineError::Other(format!(
-+                "existing merge result {id:?} has a {state} source at {path}; relink or remove it before repeating the merge"
-+            )));
+-        let (id, path, reused, promote_local) = if let Some((id, path, local)) = valid_existing {
+-            (id, path, true, local)
++        let (id, path, reused) = if let Some((id, path)) = valid_existing {
++            (id, path, true)
          } else {
              // A new file under a free name (never replacing one), complete and synced before it appears.
              let mut names = output_names(first, job.kind.suffix())
+@@ -494,7 +494,7 @@
+                 }
+             };
+             if let Some(id) = report.imported.first().copied().map(PhotoId) {
+-                (id, path, false, false)
++                (id, path, false)
+             } else {
+                 if !catalog_owns_path(self, &path) {
+                     remove_merge_output(&path);
+@@ -502,9 +502,6 @@
+                 return Err(EngineError::Other(format!("the merged file {path} could not be imported: {:?}", report.failed)));
+             }
+         };
+-        if promote_local {
+-            self.commit("Add to My Photos", Op::SetLocal { id, local: false })?;
+-        }
+         if !reused && job.finish.stack {
+             let sources: Vec<PhotoId> = job.sources.iter().map(|(p, _)| *p).collect();
+             if let Some(op) = self.catalog.stack_with_ops(id, &sources) {
